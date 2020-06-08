@@ -1,0 +1,170 @@
+---
+title: "Shiny test"
+author: "Wouter van de Burgt"
+date: "6/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2) #Data Visualisatie
+library(tidyverse) #R Tidyverse
+library(lubridate) #Voor datum manipulatie
+library(odbc) #Connectie naar SQLServer
+library(RSQLite) #SQL statements in Rmd
+library(tmap)
+library(sp)
+library(sf)
+library(shiny)
+library(shinydashboard)
+
+#Maakt connectie met Database
+con <- dbConnect(
+  odbc(),
+  Driver = "SQL Server",
+  Server = "localhost\\SQLEXPRESS",  
+  Database = "Drugswijzer", 
+  Trusted_Connection = "True",
+  encoding = "latin1"
+)
+
+drugexp <- dbGetQuery(con, 'select * from drugexp')
+drugnotif <- dbGetQuery(con, 'select * from drugnotif')
+drugopzoekingen <- dbGetQuery(con, 'select * from drugopzoekingen')
+drugrep <- dbGetQuery(con, 'select * from drugrep')
+drugsgebruik <- dbGetQuery(con, 'select * from drugsgebruik')
+
+Nederland <- readRDS("gadm36_NLD_1_sp.rds")
+current.style <- tmap_style("col_blind")
+tmap_mode("plot")
+
+provinciedrugs <- drugsgebruik %>%
+  mutate(provincie = case_when(
+    regio=="Rotterdam-Rijnmond" | regio=="Haaglanden" | regio=="Hollands Midden"|regio=="Zuid Holland-Zuid" ~ "Zuid-Holland",
+    regio=="Amsterdam" | regio=="Gooi en Vechtstreek" | regio=="Hollands Noorden" | regio=="Kennemerland"~ "Noord-Holland",
+    regio=="Brabant-Zuidoost" | regio == "Hart voor Brabant"|regio=="West Brabant"~"Noord-Brabant",
+    regio=="Drenthe"~"Drenthe",
+    regio=="Flevoland"~"Flevoland",
+    regio=="Fryslân"~"Friesland",
+    regio=="Gelderland-Midden" | regio== "Gelderland-Zuid" | regio=="Noord- en Oost-Gelderland"~ "Gelderland",
+    regio=="Groningen" ~"Groningen",
+    regio=="Ijsselland" | regio=="Twente"~"Overijssel",
+    regio=="Limburg-Noord"|regio=="Zuid-Limburg" ~"Limburg",
+    regio=="Utrecht" ~"Utrecht",
+    regio=="Zeeland" ~"Zeeland",
+    TRUE ~ "1"
+    ))%>%
+  select(regio, provincie, Drugsnaam, Drugstype, gender, AccountID)%>%
+  filter(!is.na(Drugsnaam))
+Drugsnamen <- unique(provinciedrugs$Drugsnaam)
+
+
+```
+
+```{r}
+
+# server <- function(input, output) {
+#   output$drugskaart<-renderPlot({
+#     if (input$bool==0) {
+#       voormap <- provinciedrugs %>%
+#       filter(Drugsnaam == input$Drugskeuze)%>%
+#       group_by(provincie)%>%
+#       summarize(Totaal = n())
+#     map <- merge(x= Nederland, y=voormap, by.x="NAME_1", by.y="provincie")
+#     qtm(map, fill="Totaal", main.title = paste("Overzicht", input$Drugskeuze, "per provincie"))
+#     } else {
+#       voormap <- provinciedrugs %>%
+#       group_by(provincie)%>%
+#       summarize(Totaal = n())
+#     map <- merge(x= Nederland, y=voormap, by.x="NAME_1", by.y="provincie")
+#     qtm(map, fill="Totaal", main.title = paste("Totaaloverzicht per provincie"))
+#     }
+#   })
+#   output$provinciegeslacht <- renderPlot({
+#     provinciedrugs %>%
+#       filter(provincie == input$Provinciekeuze)%>%
+#       group_by(regio, gender, AccountID)%>%
+#       summarise(totaal = n())%>%
+#       group_by(regio, gender)%>%
+#       summarise(totaal=n())%>%
+#       ggplot(aes(x = fct_reorder(regio, totaal), y = totaal, fill=regio))+
+#       geom_bar(stat="identity", col="black") +
+#       facet_wrap(~gender)+
+#       labs(title="Geregistreerde accounts per gender", x = "Regio", y="Aantal Accounts", caption = paste("Regio =", input$Provinciekeuze))+
+#       guides(fill=FALSE)+
+#       theme(axis.text.x = element_text(angle = 90, hjust = 1))
+#   })
+#   output$provincietypes <- renderPlot({
+#     provinciedrugs %>%
+#       filter(provincie == input$Provinciekeuze)%>%
+#       group_by(regio, Drugstype)%>%
+#       summarise(totaal = n())%>%
+#       ggplot((aes(x = Drugstype, y = totaal, fill = totaal)))+
+#       geom_bar(stat="identity")+
+#       facet_wrap(~regio)+
+#       guides(fill=FALSE)+
+#       labs(title="Drugsgebruik", x = "Drugstype", y="Aantal gebruik", caption = paste("Regio =", input$Provinciekeuze))+
+#       theme(axis.text.x = element_text(angle = 90, hjust = 1))
+#   })
+#   output$keuzemap <- renderPlot({
+#     voorprovinciekeuze <- provinciedrugs %>%
+#       filter(provincie == input$Provinciekeuze)%>%
+#       group_by(provincie)%>%
+#       summarise(keuze = 1)
+#     keuzemap <- merge(x = Nederland, y = voorprovinciekeuze, by.x="NAME_1", by.y="provincie")
+#     qtm(keuzemap, fill = "keuze", main.title = paste(input$Provinciekeuze, "is geselecteerd"))+ tm_legend(show=FALSE)
+#   })
+# }
+# 
+# ui <- dashboardPage(
+#   skin = "green",
+#   dashboardHeader(title = "Drugswijzer"),
+#   dashboardSidebar(
+#       sidebarMenu(
+#         menuItem("Drugs", tabName = "drugs", icon = icon("fas fa-tablets")),
+#         menuItem("Regio's", tabName = "regios", icon = icon("map")),
+#         menuItem("Trends", tabName = "trends", icon = icon("line-chart"))
+#         )
+#     ),
+#   dashboardBody(
+#     tabItems(
+#       tabItem(tabName = "drugs",
+#         fluidRow(
+#           h2('Drugsstatistieken'),
+#           p('In dit tablad bevinden zich statistieken voor elke drug.'),
+#           h3('Overzicht totale drugs'),
+#           p('grafieken hier'),
+#           h3('Overzicht specifieke drugs'),
+#           selectInput(inputId = 'Drugskeuze', label = "Selecteer drug waar u informatie over wilt genereren.", choices = Drugsnamen),
+#           checkboxInput(inputId = 'bool', label = 'Selecteer alle drugs.', value = 0),
+#           box(plotOutput('drugskaart'), width = 3)
+#           
+#           )
+#         ),
+#       tabItem(tabName = "regios",
+#         fluidRow(
+#           h2('Drugswijzer per regio'),
+#           p('In dit tablad bevinden zich gebruikerstatisteken voor elke Nederlandse veiligheidsregio.'),
+#           h3('Overzicht Nederland'),
+#           p('grafieken hier'),
+#           h3('Overzicht regios.'),
+#           selectInput(inputId = 'Provinciekeuze', label = "Selecteer Provincie waar u informatie over wilt genereren.", choices = Provincienamen),
+#           box(plotOutput('keuzemap'), width = 3),
+#           ),
+#         fluidRow(
+#           box(plotOutput('provinciegeslacht')),
+#           box(plotOutput('provincietypes'))
+#           )
+#         ),
+#       tabItem(tabName = "trends",
+#         fluidRow(
+#           h2('Drugsstatistieken'),
+#           p('In dit tablad bevinden zich statistieken voor elke drug.'),
+#           p('grafieken hier')
+#           )      
+#         )
+#       )
+#     )
+#   )
+# 
+# shinyApp(ui, server)
+```
